@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>표 → 차트 변환기</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  /* 레이아웃: 왼쪽(데이터·설정 카드) / 오른쪽(미리보기 카드, 고정). 휴대폰에서는 한 줄로 쌓임 */
+  :root {
+    color-scheme: light;
+    --blue: #1F5EFF;
+    --blue-ink: #1545C2;
+    --blue-soft: #EEF3FF;
+    --ink: #1A1F2B;
+    --muted: #5F6672;
+    --line: #E3E7EF;
+    --sub: #F7F9FC;
+    --warn: #B45309;
+    --font: "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: #fff; }
+  body { color: var(--ink); font-family: var(--font); font-size: 16px; line-height: 1.6; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 28px 20px 48px; }
+
+  header { display: grid; gap: 4px; margin-bottom: 22px; }
+  header h1 { font-size: 1.65rem; letter-spacing: -0.5px; text-wrap: balance; }
+  header p { color: var(--muted); }
+
+  .grid { display: grid; grid-template-columns: 1fr; gap: 18px; }
+  .col { display: grid; gap: 18px; align-content: start; }
+  @media (min-width: 960px) {
+    .grid { grid-template-columns: 420px 1fr; align-items: start; }
+    .sticky { position: sticky; top: 16px; }
+  }
+
+  .card { border: 1px solid var(--line); border-radius: 18px; padding: 20px; background: #fff; box-shadow: 0 1px 2px rgba(26,31,43,.04); }
+  .card h2 { display: flex; align-items: center; gap: 10px; font-size: 1.05rem; margin-bottom: 12px; }
+  .step { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--blue); color: #fff; font-size: .85rem; font-weight: 700; }
+
+  textarea {
+    width: 100%; min-height: 200px; resize: vertical; padding: 12px 14px;
+    font: 15px/1.55 ui-monospace, "D2Coding", Consolas, monospace; color: var(--ink);
+    border: 2px solid var(--line); border-radius: 12px; background: var(--sub); tab-size: 10;
+    white-space: pre; overflow-x: auto; overflow-wrap: normal;
+  }
+  textarea:focus, input:focus, select:focus { outline: none; border-color: var(--blue); background: #fff; }
+  .hint { font-size: .85rem; color: var(--muted); margin-top: 8px; }
+  .status { margin-top: 10px; padding: 10px 12px; border-radius: 10px; background: var(--blue-soft); color: var(--blue-ink); font-size: .9rem; font-weight: 500; }
+  .status.err { background: #FDEEEE; color: #B42318; }
+  .status .w { display: block; color: var(--warn); font-weight: 400; }
+
+  .row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .btn { font: inherit; font-size: .9rem; font-weight: 500; padding: 8px 14px; border-radius: 10px; border: 1px solid var(--line); background: #fff; color: var(--ink); cursor: pointer; }
+  .btn:hover { border-color: var(--blue); color: var(--blue); }
+  .btn:focus-visible, .seg label:focus-within, .primary:focus-visible { outline: 3px solid #A9C0FF; outline-offset: 2px; }
+
+  .fields { display: grid; gap: 14px; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 400px) { .two { grid-template-columns: 1fr; } }
+  .field label, .field .lab { display: block; font-size: .88rem; font-weight: 700; margin-bottom: 6px; }
+  input[type="text"], select {
+    width: 100%; height: 46px; padding: 0 12px; font: inherit; color: var(--ink);
+    border: 2px solid var(--line); border-radius: 10px; background: #fff;
+  }
+
+  .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 4px; background: var(--sub); border: 1px solid var(--line); border-radius: 12px; }
+  .seg input { position: absolute; opacity: 0; pointer-events: none; }
+  .seg label { display: flex; align-items: center; justify-content: center; gap: 8px; height: 44px; border-radius: 9px; font-weight: 700; color: var(--muted); cursor: pointer; margin: 0; }
+  .seg input:checked + label { background: #fff; color: var(--blue); box-shadow: 0 1px 3px rgba(26,31,43,.12); }
+  .seg svg { width: 20px; height: 20px; }
+
+  .toggles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .tg { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; font-size: .9rem; cursor: pointer; }
+  .tg input { width: 18px; height: 18px; accent-color: var(--blue); }
+
+  .preview { border-radius: 12px; border: 1px solid var(--line); overflow: hidden; background: #fff; }
+  .preview.transparent { background-color: #fff; background-image: linear-gradient(45deg,#EEF0F4 25%,transparent 25%),linear-gradient(-45deg,#EEF0F4 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#EEF0F4 75%),linear-gradient(-45deg,transparent 75%,#EEF0F4 75%); background-size: 20px 20px; background-position: 0 0,0 10px,10px -10px,-10px 0; }
+  .preview img { display: block; width: 100%; height: auto; }
+  .meta { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: .82rem; color: var(--muted); margin-top: 8px; font-variant-numeric: tabular-nums; }
+  .actions { display: grid; grid-template-columns: 2fr 1fr; gap: 10px; margin-top: 14px; }
+  .primary { font: inherit; font-weight: 700; font-size: 1rem; height: 52px; border: 0; border-radius: 12px; background: var(--blue); color: #fff; cursor: pointer; }
+  .primary:hover { background: var(--blue-ink); }
+  .ghost { font: inherit; font-weight: 700; font-size: 1rem; height: 52px; border: 2px solid var(--blue); border-radius: 12px; background: #fff; color: var(--blue); cursor: pointer; }
+  .ghost:hover { background: var(--blue-soft); }
+  .msg { min-height: 1.5em; margin-top: 10px; font-size: .9rem; color: var(--blue-ink); }
+  .msg.err { color: #B42318; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>표 → 차트 변환기</h1>
+    <p>엑셀에서 표를 복사해 붙여넣으면 보고서용 막대·꺾은선 차트를 만들고 PNG로 저장합니다.</p>
+  </header>
+
+  <div class="grid">
+    <div class="col">
+      <section class="card" aria-labelledby="h-data">
+        <h2 id="h-data"><span class="step">1</span>표 붙여넣기</h2>
+        <textarea id="data" wrap="off" spellcheck="false" aria-describedby="data-hint"></textarea>
+        <p class="hint" id="data-hint">첫 행은 계열 이름(예: 2024년), 첫 열은 항목 이름(예: 1분기)입니다. 천 단위 쉼표·%는 자동으로 읽고, 보고서식 △ 표기는 음수로 처리합니다. 빈칸과 “-”는 값 없음으로 둡니다.</p>
+        <div class="row">
+          <button class="btn" type="button" id="sample">예시 데이터 넣기</button>
+          <button class="btn" type="button" id="clear">지우기</button>
+          <label class="tg" style="padding:6px 12px"><input type="checkbox" id="transpose">행/열 바꾸기</label>
+        </div>
+        <div class="status" id="status" aria-live="polite"></div>
+      </section>
+
+      <section class="card" aria-labelledby="h-opt">
+        <h2 id="h-opt"><span class="step">2</span>차트 설정</h2>
+        <div class="fields">
+          <div class="field">
+            <span class="lab">차트 종류</span>
+            <div class="seg" role="radiogroup" aria-label="차트 종류">
+              <input type="radio" name="type" id="t-bar" value="bar" checked>
+              <label for="t-bar"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><rect x="2" y="9" width="4" height="9" rx="1"/><rect x="8" y="4" width="4" height="14" rx="1"/><rect x="14" y="11" width="4" height="7" rx="1"/></svg>막대</label>
+              <input type="radio" name="type" id="t-line" value="line">
+              <label for="t-line"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 15l5-6 4 3 7-8"/></svg>꺾은선</label>
+            </div>
+          </div>
+          <div class="field">
+            <label for="title">차트 제목</label>
+            <input type="text" id="title" placeholder="예: 분기별 매출 추이">
+          </div>
+          <div class="two">
+            <div class="field">
+              <label for="unit">단위</label>
+              <input type="text" id="unit" placeholder="예: 억원, %, 건">
+            </div>
+            <div class="field">
+              <label for="source">자료 출처</label>
+              <input type="text" id="source" placeholder="예: 내부 집계(2025)">
+            </div>
+          </div>
+          <div class="two">
+            <div class="field">
+              <label for="palette">색상</label>
+              <select id="palette">
+                <option value="blue">파랑 계열</option>
+                <option value="multi">구분 잘 되는 다채색</option>
+                <option value="mono">흑백 (인쇄용)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="size">이미지 크기</label>
+              <select id="size">
+                <option value="1600x900">16:9 · 1600×900 (PPT)</option>
+                <option value="1600x1200">4:3 · 1600×1200 (보고서)</option>
+                <option value="1400x1400">1:1 · 1400×1400</option>
+                <option value="2400x1350">16:9 고해상도 · 2400×1350</option>
+              </select>
+            </div>
+          </div>
+          <div class="toggles">
+            <label class="tg"><input type="checkbox" id="values" checked>값 표시</label>
+            <label class="tg"><input type="checkbox" id="legend" checked>범례 표시</label>
+            <label class="tg"><input type="checkbox" id="zero" checked>0부터 시작</label>
+            <label class="tg"><input type="checkbox" id="transparent">투명 배경</label>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <section class="card sticky" aria-labelledby="h-prev">
+      <h2 id="h-prev"><span class="step">3</span>미리보기 · 저장</h2>
+      <div class="preview" id="preview"><img id="out" alt="생성된 차트 미리보기"></div>
+      <div class="meta"><span id="sizeInfo"></span><span>휴대폰에서는 이미지를 길게 눌러도 저장할 수 있습니다.</span></div>
+      <div class="actions">
+        <button class="primary" type="button" id="save">PNG로 저장</button>
+        <button class="ghost" type="button" id="copy">이미지 복사</button>
+      </div>
+      <p class="msg" id="msg" aria-live="polite"></p>
+    </section>
+  </div>
+</div>
+
+<script>
+const SAMPLE = "구분\t2023년\t2024년\t2025년\n1분기\t120\t135\t142\n2분기\t128\t150\t158\n3분기\t131\t147\t165\n4분기\t140\t162\t171";
+const PALETTES = {
+  blue:  ["#1F5EFF", "#8EAEFF", "#0B2E8A", "#4F7BFF", "#C2D3FF", "#5C6B8A"],
+  multi: ["#1F5EFF", "#F08C00", "#22A06B", "#8B5CF6", "#E5484D", "#0EA5B7"],
+  mono:  ["#1F2430", "#8A9099", "#C3C7CE", "#4B515C", "#A6ABB3", "#DADDE2"]
+};
+const FONT = '"Noto Sans KR","Apple SD Gothic Neo","Malgun Gothic",sans-serif';
+const $ = id => document.getElementById(id);
+
+/* ---------- 표 읽기 ---------- */
+function splitCSV(line) {
+  const out = []; let cur = "", q = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (q) { if (c === '"' && line[i + 1] === '"') { cur += '"'; i++; } else if (c === '"') q = false; else cur += c; }
+    else if (c === '"') q = true; else if (c === ",") { out.push(cur); cur = ""; } else cur += c;
+  }
+  out.push(cur); return out;
+}
+function toNum(s) {
+  if (s == null) return null;
+  let t = String(s).trim();
+  if (!t || /^[-–—]$/.test(t)) return null;
+  let neg = /^\(.*\)$/.test(t) || /^[△▽]/.test(t);
+  t = t.replace(/[(),\s△▽▲₩$"]/g, "");
+  const m = t.match(/^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?/i);
+  if (!m) return null;
+  const v = parseFloat(m[0]);
+  return neg ? -Math.abs(v) : v;
+}
+function parseTable(text, transpose) {
+  const lines = text.replace(/\r/g, "").split("\n").filter(l => l.trim() !== "");
+  if (!lines.length) return { error: "표를 붙여넣어 주세요." };
+  const tab = text.includes("\t");
+  let rows = lines.map(l => tab ? l.split("\t") : splitCSV(l));
+  const width = Math.max(...rows.map(r => r.length));
+  rows = rows.map(r => { const c = r.slice(); while (c.length < width) c.push(""); return c; });
+  if (transpose) rows = rows[0].map((_, c) => rows.map(r => r[c]));
+  if (rows.length < 2 || rows[0].length < 2)
+    return { error: "최소 2행 2열이 필요합니다. 첫 행은 계열 이름, 첫 열은 항목 이름, 나머지는 숫자로 된 표를 붙여넣어 주세요." };
+
+  const header = rows[0], body = rows.slice(1);
+  const cats = body.map(r => r[0].trim() || "(빈 항목)");
+  const series = [], dropped = [];
+  let blanks = 0, decimals = 0;
+  for (let c = 1; c < header.length; c++) {
+    const name = (header[c] || "").trim() || `계열 ${c}`;
+    const values = body.map(r => toNum(r[c]));
+    if (values.every(v => v === null)) { dropped.push(name); continue; }
+    blanks += values.filter(v => v === null).length;
+    body.forEach(r => { const m = String(r[c]).match(/\.(\d+)/); if (m) decimals = Math.max(decimals, m[1].length); });
+    series.push({ name, values });
+  }
+  if (!series.length) return { error: "숫자로 읽을 수 있는 열이 없습니다. 첫 열 외의 칸에 숫자가 있는지 확인해 주세요." };
+  return { cats, series, blanks, dropped, decimals: Math.min(decimals, 2) };
+}
+
+/* ---------- 차트 그리기 (Canvas) ---------- */
+function niceStep(range, count) {
+  const raw = range / count, p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p;
+}
+function fmt(v, d) { return v.toLocaleString("ko-KR", { minimumFractionDigits: 0, maximumFractionDigits: d }); }
+function stepDecimals(step) { const s = String(+step.toPrecision(6)); return s.includes(".") ? s.split(".")[1].length : 0; }
+
+function draw(canvas, d, o) {
+  const [W, H] = o.size;
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  const s = W / 1200, F = (w, px) => `${w} ${px * s}px ${FONT}`;
+  const INK = "#1A1F2B", MUTED = "#5F6672", GRID = "#E6EAF2", AXIS = "#9AA3B2";
+  const pal = PALETTES[o.palette], col = i => pal[i % pal.length];
+  ctx.clearRect(0, 0, W, H);
+  if (!o.transparent) { ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H); }
+
+  const pad = 52 * s;
+  let y = pad;
+  ctx.textBaseline = "alphabetic";
+
+  if (o.title) {
+    ctx.font = F(700, 34); ctx.fillStyle = INK; ctx.textAlign = "left";
+    ctx.fillText(o.title, pad, y + 32 * s);
+    y += 34 * s * 1.3 + 14 * s;
+  }
+
+  if (o.legend) {
+    ctx.font = F(400, 20);
+    const lh = 32 * s; let x = pad, ly = y;
+    d.series.forEach((se, j) => {
+      const tw = ctx.measureText(se.name).width, w = 26 * s + 8 * s + tw + 24 * s;
+      if (x + w > W - pad && x > pad) { x = pad; ly += lh; }
+      ctx.fillStyle = col(j); ctx.strokeStyle = col(j);
+      const cy = ly + lh / 2 - 4 * s;
+      if (o.type === "bar") { rr(ctx, x, cy - 8 * s, 16 * s, 16 * s, 3 * s); ctx.fill(); }
+      else {
+        ctx.lineWidth = 3.5 * s; ctx.beginPath(); ctx.moveTo(x, cy); ctx.lineTo(x + 26 * s, cy); ctx.stroke();
+        ctx.beginPath(); ctx.arc(x + 13 * s, cy, 5 * s, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.fillStyle = INK; ctx.textBaseline = "middle";
+      ctx.fillText(se.name, x + (o.type === "bar" ? 16 : 26) * s + 8 * s, cy + 1 * s);
+      ctx.textBaseline = "alphabetic";
+      x += w;
+    });
+    y = ly + lh + 6 * s;
+  }
+
+  // 값 범위와 눈금
+  const all = d.series.flatMap(se => se.values).filter(v => v !== null);
+  let lo = Math.min(...all), hi = Math.max(...all);
+  if (o.zero) { lo = Math.min(0, lo); hi = Math.max(0, hi); }
+  if (lo === hi) { hi = lo + (lo === 0 ? 1 : Math.abs(lo) * 0.1); if (!o.zero) lo -= (hi - lo); }
+  const step = niceStep(hi - lo, 5);
+  lo = Math.floor(lo / step + 1e-9) * step; hi = Math.ceil(hi / step - 1e-9) * step;
+  const tickD = Math.max(stepDecimals(step), 0);
+  const ticks = []; for (let i = 0; i <= Math.round((hi - lo) / step); i++) ticks.push(+(lo + i * step).toFixed(10));
+
+  const unitH = o.unit ? 30 * s : 0, srcH = o.source ? 36 * s : 0;
+  ctx.font = F(400, 18);
+  const yLabW = Math.max(...ticks.map(t => ctx.measureText(fmt(t, tickD)).width));
+  const plotL = pad + yLabW + 14 * s, plotR = W - pad;
+  const n = d.cats.length, slot = (plotR - plotL) / n;
+
+  ctx.font = F(400, 19);
+  const catW = Math.max(...d.cats.map(c => ctx.measureText(c).width));
+  const rotate = catW > slot * 0.92, ang = Math.PI * 40 / 180;
+  const xLabH = rotate ? Math.min(catW * Math.sin(ang) + 19 * s + 14 * s, H * 0.28) : 38 * s;
+  const plotT = y + unitH + (o.values ? 28 * s : 12 * s);
+  const plotB = H - pad - srcH - xLabH;
+  const yOf = v => plotB - (v - lo) / (hi - lo) * (plotB - plotT);
+
+  if (o.unit) {
+    ctx.font = F(400, 18); ctx.fillStyle = MUTED; ctx.textAlign = "right";
+    ctx.fillText(`(단위: ${o.unit})`, plotR, y + 18 * s);
+  }
+
+  // 격자와 Y축 눈금
+  ctx.font = F(400, 18); ctx.textAlign = "right"; ctx.textBaseline = "middle";
+  ticks.forEach(t => {
+    const ty = Math.round(yOf(t)) + 0.5;
+    ctx.strokeStyle = GRID; ctx.lineWidth = 1 * s;
+    ctx.beginPath(); ctx.moveTo(plotL, ty); ctx.lineTo(plotR, ty); ctx.stroke();
+    ctx.fillStyle = MUTED; ctx.fillText(fmt(t, tickD), plotL - 12 * s, ty);
+  });
+  const base = Math.min(Math.max(0, lo), hi);
+  ctx.strokeStyle = AXIS; ctx.lineWidth = 1.5 * s;
+  ctx.beginPath(); ctx.moveTo(plotL, yOf(base)); ctx.lineTo(plotR, yOf(base)); ctx.stroke();
+
+  // X축 항목
+  ctx.font = F(400, 19); ctx.fillStyle = INK;
+  d.cats.forEach((c, i) => {
+    const cx = plotL + slot * (i + 0.5);
+    if (rotate) {
+      ctx.save(); ctx.translate(cx, plotB + 14 * s); ctx.rotate(-ang);
+      ctx.textAlign = "right"; ctx.textBaseline = "middle"; ctx.fillText(c, 0, 0); ctx.restore();
+    } else {
+      ctx.textAlign = "center"; ctx.textBaseline = "top"; ctx.fillText(c, cx, plotB + 12 * s);
+    }
+  });
+
+  const k = d.series.length;
+  const valFont = Math.max(12, Math.min(17, 17 - (n * k > 24 ? 3 : 0)));
+
+  if (o.type === "bar") {
+    const groupW = slot * (k > 1 ? 0.78 : 0.56), bw = groupW / k, gap = k > 1 ? Math.min(4 * s, bw * 0.12) : 0;
+    d.series.forEach((se, j) => {
+      se.values.forEach((v, i) => {
+        if (v === null) return;
+        const cx = plotL + slot * (i + 0.5);
+        const x0 = cx - groupW / 2 + j * bw + gap / 2, w = bw - gap;
+        const yb = yOf(base), yv = yOf(v), top = Math.min(yb, yv), h = Math.abs(yb - yv);
+        const r = Math.min(4 * s, w / 2, h);
+        ctx.fillStyle = col(j);
+        rr(ctx, x0, top, w, h, v >= base ? [r, r, 0, 0] : [0, 0, r, r]); ctx.fill();
+        if (o.values) {
+          ctx.font = F(500, valFont); ctx.fillStyle = INK; ctx.textAlign = "center";
+          ctx.textBaseline = v >= base ? "bottom" : "top";
+          ctx.fillText(fmt(v, d.decimals), x0 + w / 2, v >= base ? yv - 6 * s : yv + 6 * s);
+        }
+      });
+    });
+  } else {
+    const labels = d.cats.map(() => []);
+    d.series.forEach((se, j) => {
+      const pts = se.values.map((v, i) => v === null ? null : [plotL + slot * (i + 0.5), yOf(v), v]);
+      ctx.strokeStyle = col(j); ctx.lineWidth = 3.5 * s; ctx.lineJoin = "round"; ctx.lineCap = "round";
+      ctx.beginPath(); let pen = false;
+      pts.forEach(p => { if (!p) { pen = false; return; } pen ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); pen = true; });
+      ctx.stroke();
+      let last = -1; pts.forEach((p, i) => { if (p) last = i; });
+      pts.forEach((p, i) => {
+        if (!p) return;
+        ctx.beginPath(); ctx.arc(p[0], p[1], (i === last ? 6.5 : 5) * s, 0, Math.PI * 2);
+        ctx.fillStyle = i === last ? col(j) : "#fff"; ctx.fill();
+        ctx.lineWidth = 3 * s; ctx.strokeStyle = col(j); ctx.stroke();
+        if (o.values) labels[i].push({ x: p[0], y: p[1], t: fmt(p[2], d.decimals), bold: i === last, c: col(j) });
+      });
+    });
+    // 같은 항목의 값 레이블이 겹치지 않게 위·아래로 배치
+    if (o.values) {
+      const lh = valFont * s * 1.15, off = 12 * s;
+      labels.forEach(list => {
+        list.sort((a, b) => a.y - b.y);
+        let prevBottom = -Infinity;
+        list.forEach((L, idx) => {
+          let top = L.y - off - lh;                       // 점 위
+          if (top < prevBottom + 2 * s) top = L.y + off;  // 겹치면 점 아래
+          if (top < prevBottom + 2 * s) top = prevBottom + 2 * s;
+          prevBottom = top + lh;
+          ctx.font = F(L.bold ? 700 : 500, valFont); ctx.textAlign = "center"; ctx.textBaseline = "top";
+          ctx.lineWidth = 5 * s; ctx.strokeStyle = o.transparent ? "rgba(255,255,255,0)" : "#fff"; ctx.lineJoin = "round";
+          ctx.strokeText(L.t, L.x, top);
+          ctx.fillStyle = INK;
+          ctx.fillText(L.t, L.x, top);
+        });
+      });
+    }
+  }
+
+  if (o.source) {
+    ctx.font = F(400, 17); ctx.fillStyle = MUTED; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    ctx.fillText(`자료: ${o.source}`, pad, H - pad + 6 * s);
+  }
+}
+function rr(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(x, y, w, h, r); else ctx.rect(x, y, w, h);
+}
+
+/* ---------- 화면 연결 ---------- */
+const canvas = document.createElement("canvas");
+let blob = null, url = null, timer = null, parsed = null;
+
+function opts() {
+  const [w, h] = $("size").value.split("x").map(Number);
+  return {
+    type: document.querySelector('input[name="type"]:checked').value,
+    title: $("title").value.trim(), unit: $("unit").value.trim(), source: $("source").value.trim(),
+    palette: $("palette").value, size: [w, h],
+    values: $("values").checked, legend: $("legend").checked, zero: $("zero").checked, transparent: $("transparent").checked
+  };
+}
+
+function update() {
+  parsed = parseTable($("data").value, $("transpose").checked);
+  const st = $("status");
+  if (parsed.error) {
+    st.className = "status err"; st.textContent = parsed.error;
+    $("save").disabled = $("copy").disabled = true; return;
+  }
+  const notes = [];
+  if (parsed.blanks) notes.push(`빈칸 ${parsed.blanks}개는 값 없음으로 두었습니다.`);
+  if (parsed.dropped.length) notes.push(`숫자가 없는 열(${parsed.dropped.join(", ")})은 제외했습니다.`);
+  if (parsed.series.length > 6) notes.push("계열이 6개를 넘어 색이 반복됩니다.");
+  st.className = "status";
+  st.innerHTML = `항목 ${parsed.cats.length}개 · 계열 ${parsed.series.length}개를 읽었습니다.` + notes.map(t => `<span class="w">${t}</span>`).join("");
+  $("save").disabled = $("copy").disabled = false;
+
+  const o = opts();
+  draw(canvas, parsed, o);
+  $("preview").classList.toggle("transparent", o.transparent);
+  $("sizeInfo").textContent = `${o.size[0]} × ${o.size[1]} px · PNG`;
+  canvas.toBlob(b => {
+    blob = b;
+    if (url) URL.revokeObjectURL(url);
+    url = URL.createObjectURL(b);
+    $("out").src = url;
+  }, "image/png");
+}
+function schedule() { clearTimeout(timer); timer = setTimeout(update, 120); }
+
+function say(t, err) { const m = $("msg"); m.textContent = t; m.className = "msg" + (err ? " err" : ""); }
+function fileName() { return (($("title").value.trim() || "차트").replace(/[\\/:*?"<>|]/g, "").slice(0, 60) || "차트") + ".png"; }
+
+let downloads = null;
+if (window.claude && typeof window.claude.use === "function") {
+  window.claude.use("downloads").then(d => { downloads = d; }).catch(() => { downloads = null; });
+}
+
+$("save").addEventListener("click", async () => {
+  if (!blob) return;
+  if (downloads) {
+    try { await downloads.save({ filename: fileName(), data: blob }); say("PNG 파일을 저장했습니다."); }
+    catch (e) {
+      const c = e && e.code;
+      say(c === "declined" ? "저장을 취소했습니다." :
+          c === "rate_limited" ? "이미 저장 확인 창이 열려 있습니다. 잠시 후 다시 눌러 주세요." :
+          "이 화면에서는 파일 저장을 쓸 수 없습니다. 미리보기 이미지를 길게 누르거나 마우스 오른쪽 버튼으로 저장해 주세요.", c !== "declined");
+    }
+    return;
+  }
+  if (!window.claude) {           // 파일로 직접 열었을 때
+    const a = document.createElement("a"); a.href = url; a.download = fileName(); a.click();
+    say("PNG 파일을 저장했습니다."); return;
+  }
+  say("이 화면에서는 파일 저장을 쓸 수 없습니다. 미리보기 이미지를 길게 누르거나 마우스 오른쪽 버튼으로 저장해 주세요.", true);
+});
+
+$("copy").addEventListener("click", async () => {
+  if (!blob) return;
+  try {
+    if (!window.ClipboardItem || !navigator.clipboard || !navigator.clipboard.write) throw new Error();
+    await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+    say("이미지를 복사했습니다. 한글·PPT·엑셀에 바로 붙여넣을 수 있습니다.");
+  } catch { say("이 브라우저에서는 이미지 복사를 쓸 수 없습니다. PNG로 저장해 주세요.", true); }
+});
+
+$("sample").addEventListener("click", () => {
+  $("data").value = SAMPLE; $("title").value = "분기별 매출 추이(예시)"; $("unit").value = "억원"; $("source").value = "예시 데이터"; update();
+});
+$("clear").addEventListener("click", () => { $("data").value = ""; $("data").focus(); update(); });
+document.querySelectorAll("input, select, textarea").forEach(el => el.addEventListener("input", schedule));
+document.querySelectorAll('input[type="checkbox"], input[type="radio"], select').forEach(el => el.addEventListener("change", schedule));
+
+// 처음 열면 예시 데이터로 채운 상태
+$("data").value = SAMPLE; $("title").value = "분기별 매출 추이(예시)"; $("unit").value = "억원"; $("source").value = "예시 데이터";
+update();
+if (document.fonts) Promise.all([document.fonts.load(`400 20px "Noto Sans KR"`), document.fonts.load(`700 20px "Noto Sans KR"`), document.fonts.load(`500 20px "Noto Sans KR"`)]).then(update).catch(() => {});
+</script>
+</body>
+</html>
